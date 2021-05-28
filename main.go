@@ -4,38 +4,79 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
+	"encoding/json"
+	"html/template"
+	"io/ioutil"
+	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 type Block struct {
-	Proof         int64
-	Timestamp     int64
-	Data          []byte
-	PrevBlockHash []byte
-	Hash          []byte
+	Proof         int64  `json:"Proof"`
+	Timestamp     int64  `json:"Timestamp"`
+	Data          []byte `json:"Data"`
+	PrevBlockHash []byte `json:"PrevBlockHash"`
+	Hash          []byte `json:"Hash"`
+}
+
+type DisplayBlock struct {
+	Proof         int64  `json:"Proof"`
+	Data          string `json:"Data"`
+	PrevBlockHash string `json:"PrevBlockHash"`
+	Hash          string `json:"Hash"`
+}
+
+type readData struct {
+	Data string `json:"Data"`
 }
 
 type Blockchain struct {
 	blocks []*Block
 }
 
+var tpl *template.Template
+var bc *Blockchain
+var allBlock []DisplayBlock
+
+func init() {
+	tpl = template.Must(template.ParseGlob("templates/*"))
+	bc = NewBlockchain()
+}
+
 func main() {
-	bc := NewBlockchain()
+	myRouter := mux.NewRouter().StrictSlash(true)
+	myRouter.HandleFunc("/", index)
+	myRouter.HandleFunc("/blockchain", returnAllBlocks)
+	myRouter.HandleFunc("/addBlock", addBlockPost).Methods("POST")
+	http.ListenAndServe(":8080", myRouter)
+}
 
-	bc.AddBlock("Send 1 BTC to Ivan")
-	bc.AddBlock("Send 2 more BTC to Ivan")
-	bc.AddBlock("Send 1 more BTC to Ivan")
-	bc.AddBlock("Send 4 more BTC to Ivan")
-
-	for _, block := range bc.blocks {
-		fmt.Printf("Prev. hash: %x\n", block.PrevBlockHash)
-		fmt.Printf("Data: %s\n", block.Data)
-		fmt.Printf("Hash: %x\n", block.Hash)
-		fmt.Printf("Proof Of Work: %d\n", block.Proof)
-		fmt.Println()
+func index(res http.ResponseWriter, req *http.Request) {
+	transaction := req.FormValue("data")
+	nblock := bc.AddBlock(transaction)
+	currBlock := DisplayBlock{
+		Proof:         nblock.Proof,
+		Data:          transaction,
+		Hash:          hex.EncodeToString(nblock.Hash),
+		PrevBlockHash: hex.EncodeToString(nblock.PrevBlockHash),
 	}
+	tpl.ExecuteTemplate(res, "blockchain.gohtml", currBlock)
+}
+
+func returnAllBlocks(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(allBlock)
+	json.NewEncoder(w).Encode(200)
+}
+
+func addBlockPost(w http.ResponseWriter, r *http.Request) {
+	reqbody, _ := ioutil.ReadAll(r.Body)
+	var rdata readData
+	json.Unmarshal(reqbody, &rdata)
+	bc.AddBlock(rdata.Data)
+	json.NewEncoder(w).Encode(201)
 }
 
 func (b *Block) SetHash() {
@@ -52,11 +93,19 @@ func NewBlock(proof int64, data string, prevBlockHash []byte) *Block {
 	return block
 }
 
-func (bc *Blockchain) AddBlock(data string) {
+func (bc *Blockchain) AddBlock(data string) *Block {
 	prevBlock := bc.blocks[len(bc.blocks)-1]
 	newBlock := NewBlock(1, data, prevBlock.Hash)
 	newBlock.proofOfWork()
+	newDisplayBlock := DisplayBlock{
+		Data:          string(newBlock.Data),
+		Hash:          hex.EncodeToString(newBlock.Hash),
+		PrevBlockHash: hex.EncodeToString(newBlock.PrevBlockHash),
+		Proof:         newBlock.Proof,
+	}
+	allBlock = append(allBlock, newDisplayBlock)
 	bc.blocks = append(bc.blocks, newBlock)
+	return newBlock
 }
 
 func GetBlockHash(b Block) [32]byte {
@@ -73,7 +122,7 @@ func (b *Block) proofOfWork() {
 	for !check_proof {
 		hash := GetBlockHash(*b)
 		hash_operation := hex.EncodeToString(hash[:])
-		if hash_operation[:5] == "00000" {
+		if hash_operation[:4] == "0000" {
 			check_proof = true
 		} else {
 			new_proof++
