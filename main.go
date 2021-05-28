@@ -50,9 +50,12 @@ func main() {
 	myRouter := mux.NewRouter().StrictSlash(true)
 	myRouter.HandleFunc("/", index)
 	myRouter.HandleFunc("/blockchain", returnAllBlocks)
+	myRouter.HandleFunc("/isvalid", isValid)
 	myRouter.HandleFunc("/addBlock", addBlockPost).Methods("POST")
 	http.ListenAndServe(":8080", myRouter)
 }
+
+// Handler Functions
 
 func index(res http.ResponseWriter, req *http.Request) {
 	transaction := req.FormValue("data")
@@ -79,6 +82,16 @@ func addBlockPost(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(201)
 }
 
+func isValid(w http.ResponseWriter, r *http.Request) {
+	if bc.isChainValid() {
+		json.NewEncoder(w).Encode("Chain Valid")
+	} else {
+		json.NewEncoder(w).Encode("Chain Invalid")
+	}
+}
+
+//Utility functions
+/*
 func (b *Block) SetHash() {
 	timestamp := []byte(strconv.FormatInt(b.Timestamp, 10))
 	headers := bytes.Join([][]byte{b.PrevBlockHash, b.Data, timestamp}, []byte{})
@@ -86,12 +99,7 @@ func (b *Block) SetHash() {
 
 	b.Hash = hash[:]
 }
-
-func NewBlock(proof int64, data string, prevBlockHash []byte) *Block {
-	block := &Block{proof, time.Now().Unix(), []byte(data), prevBlockHash, []byte{}}
-	block.SetHash()
-	return block
-}
+*/
 
 func (bc *Blockchain) AddBlock(data string) *Block {
 	prevBlock := bc.blocks[len(bc.blocks)-1]
@@ -106,13 +114,6 @@ func (bc *Blockchain) AddBlock(data string) *Block {
 	allBlock = append(allBlock, newDisplayBlock)
 	bc.blocks = append(bc.blocks, newBlock)
 	return newBlock
-}
-
-func GetBlockHash(b Block) [32]byte {
-	timestamp := []byte(strconv.FormatInt(b.Timestamp, 10))
-	headers := bytes.Join([][]byte{b.PrevBlockHash, b.Data, timestamp, []byte(strconv.FormatInt(b.Proof, 10))}, []byte{})
-	hash := sha256.Sum256(headers)
-	return hash
 }
 
 func (b *Block) proofOfWork() {
@@ -133,10 +134,42 @@ func (b *Block) proofOfWork() {
 	b.Hash = updatehash[:]
 }
 
+func (bc *Blockchain) isChainValid() bool {
+	previous_block := bc.blocks[0]
+	block_index := 1
+	var cur_block *Block
+	for block_index < len(bc.blocks) {
+		cur_block = bc.blocks[block_index]
+		if !bytes.Equal(cur_block.Hash, previous_block.PrevBlockHash) {
+			return false
+		}
+		block_hash := GetBlockHash(*cur_block)
+		hashtocompare := hex.EncodeToString(block_hash[:])
+		if hashtocompare[:4] != "0000" {
+			return false
+		}
+		previous_block = cur_block
+		block_index++
+	}
+	return true
+}
+
+func GetBlockHash(b Block) [32]byte {
+	timestamp := []byte(strconv.FormatInt(time.Now().Unix(), 10))
+	headers := bytes.Join([][]byte{b.PrevBlockHash, b.Data, timestamp, []byte(strconv.FormatInt(b.Proof, 10))}, []byte{})
+	hash := sha256.Sum256(headers)
+	return hash
+}
+
 func NewGenesisBlock() *Block {
 	return NewBlock(0, "Genesis Block", []byte{})
 }
 
 func NewBlockchain() *Blockchain {
 	return &Blockchain{[]*Block{NewGenesisBlock()}}
+}
+
+func NewBlock(proof int64, data string, prevBlockHash []byte) *Block {
+	block := &Block{proof, time.Now().Unix(), []byte(data), prevBlockHash, []byte{}}
+	return block
 }
